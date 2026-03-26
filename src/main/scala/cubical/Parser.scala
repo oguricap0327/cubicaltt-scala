@@ -2,7 +2,6 @@ package cubical
 
 import scala.util.parsing.combinator.*
 import Term.*
-import Formula.*
 
 /** Parser for cubical type theory syntax.
  *  Compatible with Mortberg's grammar but with Unicode support.
@@ -12,6 +11,7 @@ object Parser extends RegexParsers:
   // ── Lexical ──────────────────────────────────────────────
   
   override def skipWhitespace = true
+  override protected val whiteSpace = """(\s|--.*)+""".r  // Handle comments
   
   def ident: Parser[String] = 
     """[a-zA-Z_][a-zA-Z0-9_']*""".r
@@ -27,29 +27,26 @@ object Parser extends RegexParsers:
     piType | sigmaType | pathType | lamExpr | app
   
   def piType: Parser[Term] =
-    ("(" ~> ident <~ ":" ~ ")") ~ term ~ ("->" ~> term) ^^ {
-      case x ~ a ~ b => Pi(Lam(x, a, b), a)
-    } |
-    "Π" ~> "(" ~> ident ~ (":" ~> term) ~ (")" ~> term) ^^ {
-      case x ~ a ~ b => Pi(Lam(x, a, b), a)
+    ("(" ~> ident <~ ":") ~ (term <~ ")") ~ ("->" ~> term) ^^ {
+      case x ~ a ~ b => Pi(a, Lam(x, a, b))
     }
   
   def sigmaType: Parser[Term] =
-    ("(" ~> ident <~ ":" ~ ")") ~ term ~ ("×" | "*") ~ term ^^ {
-      case x ~ a ~ _ ~ b => Sigma(a, Lam(x, a, b))
-    } |
-    "Σ" ~> "(" ~> ident ~ (":" ~> term) ~ (")" ~> term) ^^ {
+    ("(" ~> ident <~ ":") ~ (term <~ ")") ~ ("*" ~> term) ^^ {
       case x ~ a ~ b => Sigma(a, Lam(x, a, b))
     }
   
   def pathType: Parser[Term] =
-    "PathP" ~> "(" ~> term ~ (")" ~> term) ~ term ^^ {
+    "Path" ~> atom ~ atom ~ atom ^^ {
+      case a ~ u ~ v => PathP(Lam("_", Univ, a), u, v)
+    } |
+    "PathP" ~> atom ~ atom ~ atom ^^ {
       case a ~ u ~ v => PathP(a, u, v)
     }
   
   def lamExpr: Parser[Term] =
-    ("\\" | "λ") ~> ident ~ (":" ~> term) ~ ("->" ~> term) ^^ {
-      case x ~ ty ~ body => Lam(x, ty, body)
+    "\\" ~> rep1(ident) ~ ("->" ~> term) ^^ {
+      case xs ~ body => xs.foldRight(body)((x, b) => Lam(x, Univ, b))
     }
   
   def app: Parser[Term] = 
@@ -63,3 +60,4 @@ object Parser extends RegexParsers:
     "(" ~> term <~ ")"
 
 end Parser
+
