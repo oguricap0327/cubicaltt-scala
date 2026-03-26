@@ -1,0 +1,84 @@
+module mystery where
+
+import helix
+import torus
+
+-- a function on numbers:
+-- (1) start with (Z * Z) * (Z * Z)
+-- (2) (loopS1 * loopS1) * (loopS1 * loopS1)
+-- (3) loopT * loopT
+-- (4) compose them to a loopT
+-- (5) convert back to (loopS1 * loopS1)
+-- (6) convert back to (Z * Z)
+
+-- use transport to lift just because we can :)
+Zs_to_loopS1s (input : and (and Z Z) (and Z Z)) : and (and loopS1 loopS1) (and loopS1 loopS1) =
+   transport (<i> and (and (loopS1equalsZ @ -i) (loopS1equalsZ @ -i)) (and (loopS1equalsZ @ -i) (loopS1equalsZ @ -i))) input
+
+-- could do this with transport too but would have to prove the equivalence
+c2t_on_loops (p : (and loopS1 loopS1)) : loopT =
+  <x> c2t (p.1 @ x, p.2@x)
+
+t2cloops (l : loopT) : (and loopS1 loopS1) = 
+  (<x> ((t2c (l @ x)).1), <x> ((t2c (l @ x)).2))
+  
+mystery (input : (and (and Z Z) (and Z Z))) : and Z Z =
+   step6 
+   where 
+     step2 : and (and loopS1 loopS1) (and loopS1 loopS1) = Zs_to_loopS1s input
+     step3 : (and loopT loopT) = (c2t_on_loops step2.1, c2t_on_loops step2.2)
+     step4 : loopT = <x> comp Torus (step3.1 @ x) [(x = 1) -> step3.2]
+     step5 : (and loopS1 loopS1) = (t2cloops step4)
+     step6 : and Z Z = transport (<i> and (loopS1equalsZ @ i) (loopS1equalsZ @ i)) step5
+
+oneZ : Z = sucZ zeroZ
+twoZ : Z = sucZ (oneZ)
+threeZ : Z = sucZ twoZ
+fourZ : Z = sucZ threeZ
+fiveZ : Z = sucZ fourZ
+sixZ : Z = sucZ fiveZ
+sevenZ : Z = sucZ sixZ
+
+double : nat -> nat = split
+   zero -> zero
+   suc n -> suc (suc (double n))
+
+sixteenN : nat = (double (double (double (double (double (suc zero))))))
+thirtyTwoN : nat = double sixteenN
+sixtyFourN : nat = double thirtyTwoN
+oneTwentyEightN : nat = double sixtyFourN
+twoFiftySixN : nat = double oneTwentyEightN
+
+test0 : Id (and Z Z) (mystery ((zeroZ,oneZ),(twoZ,threeZ))) (twoZ,fourZ) =
+ <_> (twoZ,fourZ)
+
+test1 : Id (and Z Z) (mystery ((oneZ,twoZ),(twoZ,threeZ))) (threeZ,fiveZ) =
+ <_> (threeZ,fiveZ)
+
+test1' : Id (and Z Z) (mystery ((twoZ,threeZ),(oneZ,twoZ))) (threeZ,fiveZ) =
+ <_> (threeZ,fiveZ)
+
+test2 : Id (and Z Z) (mystery ((oneZ,twoZ),(threeZ,threeZ))) (fourZ,fiveZ) =
+ <_> (fourZ,fiveZ)
+
+test3 : Id (and Z Z) (mystery ((twoZ,twoZ),(threeZ,threeZ))) (fiveZ,fiveZ) =
+ <_> (fiveZ,fiveZ)
+
+test4 : Id (and Z Z) (mystery ((oneZ,twoZ),(threeZ,fourZ))) (fourZ,sixZ) =
+ <_> (fourZ,sixZ)
+
+test5 : Id (and Z Z) (mystery ((inr sixteenN,inr sixteenN),(inr sixteenN,inr sixteenN)))
+                     (inr thirtyTwoN, inr thirtyTwoN) =
+ <_> (inr thirtyTwoN, inr thirtyTwoN)
+
+test6 : Id (and Z Z) (mystery ((inr thirtyTwoN,inr sixteenN),(inr thirtyTwoN,inr sixteenN)))
+                     (inr sixtyFourN, inr thirtyTwoN) =
+ <_> (inr sixtyFourN, inr thirtyTwoN)
+
+-- test7 : Id (and Z Z) (mystery ((inr sixtyFourN,inr sixteenN),(inr sixtyFourN,inr sixteenN)))
+--                      (inr oneTwentyEightN, inr thirtyTwoN) =
+--  <_> (inr oneTwentyEightN, inr thirtyTwoN)
+
+-- test8 : Id (and Z Z) (mystery ((inr oneTwentyEightN,inr sixteenN),(inr oneTwentyEightN,inr sixteenN)))
+--                      (inr twoFiftySixN, inr thirtyTwoN) =
+--  <_> (inr twoFiftySixN, inr thirtyTwoN)
