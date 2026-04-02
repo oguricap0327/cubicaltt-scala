@@ -156,7 +156,7 @@ object Main {
         println(s"Warning: the following definitions were shadowed [${duplicates.mkString(", ")}]")
       }
 
-      val startEnv = if (options.verbose) TEnv.verboseEnv else TEnv.silentEnv
+      val startEnv = if (options.verbose) TypeEnv.verboseEnv else TypeEnv.silentEnv
       val (merr, tenv) = TypeChecker.runDeclss(startEnv, allDecls)
       merr match {
         case Some(err) => println(s"Type checking failed: $err")
@@ -177,7 +177,7 @@ object Main {
     options: Options,
     filePath: String,
     names: List[(Ident, SymKind)],
-    tenv: TEnv
+    tenv: TypeEnv
   ): Unit = {
     val reader = new java.io.BufferedReader(new java.io.InputStreamReader(System.in))
     print("> ")
@@ -205,7 +205,7 @@ object Main {
   private def evalLine(
     input: String,
     names: List[(Ident, SymKind)],
-    tenv: TEnv,
+    tenv: TypeEnv,
     normalize: Boolean
   ): Unit = {
     Parser.parseExpression(input, names) match {

@@ -17,7 +17,7 @@ object Loc {
 // ============================================================
 
 type Ident = String
-type LIdent = String
+type LabelIdent = String
 
 // Telescope: (x1 : A1) .. (xn : An)
 type Telescope = List[(Ident, Term)]
@@ -27,27 +27,27 @@ type Telescope = List[(Ident, Term)]
 // ============================================================
 
 enum Label {
-  case OLabel(name: LIdent, telescope: Telescope)
-  case PLabel(name: LIdent, telescope: Telescope, dims: List[Name], sys: System[Term])
+  case OrdinaryLabel(name: LabelIdent, telescope: Telescope)
+  case PathLabel(name: LabelIdent, telescope: Telescope, dims: List[Name], sys: System[Term])
 }
 
 object Label {
-  def labelTele(l: Label): (LIdent, Telescope) = l match {
-    case Label.OLabel(c, ts)       => (c, ts)
-    case Label.PLabel(c, ts, _, _) => (c, ts)
+  def labelTele(l: Label): (LabelIdent, Telescope) = l match {
+    case Label.OrdinaryLabel(c, ts)       => (c, ts)
+    case Label.PathLabel(c, ts, _, _) => (c, ts)
   }
 
-  def labelName(l: Label): LIdent = labelTele(l)._1
+  def labelName(l: Label): LabelIdent = labelTele(l)._1
 
-  def labelTeles(ls: List[Label]): List[(LIdent, Telescope)] = ls.map(labelTele)
+  def labelTeles(ls: List[Label]): List[(LabelIdent, Telescope)] = ls.map(labelTele)
 
-  def lookupLabel(x: LIdent, ls: List[Label]): Option[Telescope] = {
+  def lookupLabel(x: LabelIdent, ls: List[Label]): Option[Telescope] = {
     labelTeles(ls).find(_._1 == x).map(_._2)
   }
 
-  def lookupPLabel(x: LIdent, ls: List[Label]): Option[(Telescope, List[Name], System[Term])] = {
+  def lookupPathLabel(x: LabelIdent, ls: List[Label]): Option[(Telescope, List[Name], System[Term])] = {
     ls.collectFirst {
-      case Label.PLabel(y, ts, is, es) if x == y => (ts, is, es)
+      case Label.PathLabel(y, tele, dims, sys) if x == y => (tele, dims, sys)
     }
   }
 }
@@ -57,17 +57,17 @@ object Label {
 // ============================================================
 
 enum Branch {
-  case OBranch(ctor: LIdent, vars: List[Ident], body: Term)
-  case PBranch(ctor: LIdent, vars: List[Ident], dims: List[Name], body: Term)
+  case OrdinaryBranch(ctor: LabelIdent, vars: List[Ident], body: Term)
+  case PathBranch(ctor: LabelIdent, vars: List[Ident], dims: List[Name], body: Term)
 }
 
 object Branch {
-  def branchName(b: Branch): LIdent = b match {
-    case Branch.OBranch(c, _, _)    => c
-    case Branch.PBranch(c, _, _, _) => c
+  def branchName(b: Branch): LabelIdent = b match {
+    case Branch.OrdinaryBranch(c, _, _)    => c
+    case Branch.PathBranch(c, _, _, _) => c
   }
 
-  def lookupBranch(x: LIdent, bs: List[Branch]): Option[Branch] = {
+  def lookupBranch(x: LabelIdent, bs: List[Branch]): Option[Branch] = {
     bs.find(b => branchName(b) == x)
   }
 }
@@ -110,8 +110,8 @@ enum Term {
   case Pair(fst: Term, snd: Term)
   case Fst(pair: Term)
   case Snd(pair: Term)
-  case Con(name: LIdent, args: List[Term])
-  case PCon(name: LIdent, dataType: Term, args: List[Term], phis: List[Formula])
+  case Con(name: LabelIdent, args: List[Term])
+  case PCon(name: LabelIdent, dataType: Term, args: List[Term], phis: List[Formula])
   case Split(name: Ident, loc: Loc, ty: Term, branches: List[Branch])
   case Sum(loc: Loc, name: Ident, labels: List[Label])
   case HSum(loc: Loc, name: Ident, labels: List[Label])
@@ -134,11 +134,11 @@ enum Term {
 object Term {
   // Decompose applications: t => (head, args)
   def unApps(t: Term): (Term, List[Term]) = {
-    def aux(acc: List[Term], t: Term): (Term, List[Term]) = t match {
-      case App(r, s) => aux(s :: acc, r)
+    def collectApps(acc: List[Term], t: Term): (Term, List[Term]) = t match {
+      case App(r, s) => collectApps(s :: acc, r)
       case _         => (t, acc)
     }
-    aux(Nil, t)
+    collectApps(Nil, t)
   }
 
   // Build nested applications
@@ -149,7 +149,7 @@ object Term {
 
   // Wrap body in nested Where declarations
   def mkWheres(ds: List[Declarations], e: Term): Term = ds match {
-    case Nil     => e
-    case d :: ds => Where(mkWheres(ds, e), d)
+    case Nil              => e
+    case d :: restDecls   => Where(mkWheres(restDecls, e), d)
   }
 }

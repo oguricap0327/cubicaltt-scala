@@ -12,8 +12,8 @@ enum Val {
   case VPi(domain: Val, codomain: Val)
   case VSigma(fstTy: Val, sndTy: Val)
   case VPair(fst: Val, snd: Val)
-  case VCon(name: LIdent, args: List[Val])
-  case VPCon(name: LIdent, dataType: Val, args: List[Val], phis: List[Formula])
+  case VCon(name: LabelIdent, args: List[Val])
+  case VPCon(name: LabelIdent, dataType: Val, args: List[Val], phis: List[Formula])
   case VPathP(pathTy: Val, left: Val, right: Val)
   case VPLam(dim: Name, body: Val)
   case VComp(ty: Val, base: Val, sys: System[Val])
@@ -99,12 +99,12 @@ object Environment {
   val empty: Environment = Environment(Context.Empty, Nil, Nil, Nameless(Set.empty))
 
   def addDecl(d: Declarations, env: Environment): Environment = d match {
-    case Declarations.MutualDecls(m, ds) =>
+    case Declarations.MutualDecls(loc, declPairs) =>
       Environment(
-        Context.Define(m, ds, env.ctx),
+        Context.Define(loc, declPairs, env.ctx),
         env.vals,
         env.formulas,
-        Nameless(env.opaques.value -- Declarations.declIdents(ds).toSet)
+        Nameless(env.opaques.value -- Declarations.declIdents(declPairs).toSet)
       )
     case Declarations.OpaqueDecl(n) =>
       env.copy(opaques = Nameless(env.opaques.value + n))
@@ -115,23 +115,23 @@ object Environment {
   }
 
   def addDeclWhere(d: Declarations, env: Environment): Environment = d match {
-    case Declarations.MutualDecls(m, ds) =>
+    case Declarations.MutualDecls(loc, declPairs) =>
       Environment(
-        Context.Define(m, ds, env.ctx),
+        Context.Define(loc, declPairs, env.ctx),
         env.vals,
         env.formulas,
-        Nameless(env.opaques.value -- Declarations.declIdents(ds).toSet)
+        Nameless(env.opaques.value -- Declarations.declIdents(declPairs).toSet)
       )
     case _ => env
   }
 
-  def substitute(iphi: (Name, Formula), env: Environment): Environment = {
-    val (i, phi) = iphi
+  def substitute(nameFormulaPair: (Name, Formula), env: Environment): Environment = {
+    val (i, phi) = nameFormulaPair
     Environment(Context.Substitute(i, env.ctx), env.vals, phi :: env.formulas, env.opaques)
   }
 
-  def update(xv: (Ident, Val), env: Environment): Environment = {
-    val (x, v) = xv
+  def update(identValPair: (Ident, Val), env: Environment): Environment = {
+    val (x, v) = identValPair
     Environment(
       Context.Update(x, env.ctx),
       v :: env.vals,
@@ -140,16 +140,16 @@ object Environment {
     )
   }
 
-  def updateAll(xvs: List[(Ident, Val)], env: Environment): Environment = {
-    xvs.foldLeft(env)((e, xv) => update(xv, e))
+  def updateAll(identValPairs: List[(Ident, Val)], env: Environment): Environment = {
+    identValPairs.foldLeft(env)((e, identValPair) => update(identValPair, e))
   }
 
   def updateTelescope(tele: Telescope, vs: List[Val], env: Environment): Environment = {
     updateAll(tele.map(_._1).zip(vs), env)
   }
 
-  def substituteAll(iphis: List[(Name, Formula)], env: Environment): Environment = {
-    iphis.foldLeft(env)((e, iphi) => substitute(iphi, e))
+  def substituteAll(nameFormulaPairs: List[(Name, Formula)], env: Environment): Environment = {
+    nameFormulaPairs.foldLeft(env)((e, nameFormulaPair) => substitute(nameFormulaPair, e))
   }
 
   def mapEnv(f: Val => Val, g: Formula => Formula, env: Environment): Environment = {

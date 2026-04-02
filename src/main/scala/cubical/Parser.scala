@@ -389,16 +389,16 @@ private[cubical] class CubicalParser extends RegexParsers {
 
   def telescope: Parser[List[(Ident, Term)]] = rep(teleEntry) ^^ { _.flatten }
 
-  def pTeleEntry: Parser[List[(Ident, Term)]] =
+  def pathTeleEntry: Parser[List[(Ident, Term)]] =
     literal("(") ~> expr ~ (literal(":") ~> expr) <~ literal(")") >> {
       case e ~ ty =>
         appsToIdents(e) match {
           case Some(ids) => success(ids.map(id => (id, ty)))
-          case None      => failure("malformed ptele")
+          case None      => failure("malformed pathTele")
         }
     }
 
-  def pTele: Parser[List[(Ident, Term)]] = rep1(pTeleEntry) ^^ { _.flatten }
+  def pathTele: Parser[List[(Ident, Term)]] = rep1(pathTeleEntry) ^^ { _.flatten }
 
   private def appsToIdents(e: Term): Option[List[Ident]] = {
     val (head, args) = Term.unApps(e)
@@ -439,7 +439,7 @@ private[cubical] class CubicalParser extends RegexParsers {
     }
 
   def lamExpr: Parser[Term] =
-    literal("\\") ~> pTele ~ (literal("->") ~> expr) ^^ {
+    literal("\\") ~> pathTele ~ (literal("->") ~> expr) ^^ {
       case tele ~ body => buildLams(tele, body)
     }
 
@@ -461,12 +461,12 @@ private[cubical] class CubicalParser extends RegexParsers {
   def expr1: Parser[Term] = piExpr | sigmaExpr | funOrExpr2
 
   def piExpr: Parser[Term] =
-    pTele ~ (literal("->") ~> expr1) ^^ {
+    pathTele ~ (literal("->") ~> expr1) ^^ {
       case tele ~ body => buildBinds(Term.Pi.apply, tele, body)
     }
 
   def sigmaExpr: Parser[Term] =
-    pTele ~ (literal("*") ~> expr1) ^^ {
+    pathTele ~ (literal("*") ~> expr1) ^^ {
       case tele ~ body => buildBinds(Term.Sigma.apply, tele, body)
     }
 
@@ -573,12 +573,12 @@ private[cubical] class CubicalParser extends RegexParsers {
       (literal("@") ~> rep1(ident) >> { dims =>
         withScopedEnv(_.insertNames(dims).insertVars(args)) {
           literal("->") ~> expWhere ^^ { body =>
-            Branch.PBranch(ctor, args, dims.map(Name.apply), body)
+            Branch.PathBranch(ctor, args, dims.map(Name.apply), body)
           }
         }
       }) |
       withScopedEnv(_.insertVars(args)) {
-        literal("->") ~> expWhere ^^ { body => Branch.OBranch(ctor, args, body) }
+        literal("->") ~> expWhere ^^ { body => Branch.OrdinaryBranch(ctor, args, body) }
       }
     }
 
@@ -614,8 +614,8 @@ private[cubical] class CubicalParser extends RegexParsers {
   case class RawNoWhere(expr: Term) extends RawExpWhere
 
   sealed trait RawLabel
-  case class RawOLabel(name: Ident, tele: List[(List[Ident], Term)]) extends RawLabel
-  case class RawPLabel(name: Ident, tele: List[(List[Ident], Term)], dims: List[Ident], sys: System[Term]) extends RawLabel
+  case class RawOrdinaryLabel(name: Ident, tele: List[(List[Ident], Term)]) extends RawLabel
+  case class RawPathLabel(name: Ident, tele: List[(List[Ident], Term)], dims: List[Ident], sys: System[Term]) extends RawLabel
 
   // ---- Raw declaration parsers ----
 
@@ -688,8 +688,8 @@ private[cubical] class CubicalParser extends RegexParsers {
   def rawLabel: Parser[RawLabel] =
     ident ~ rawTele >> { case name ~ tele =>
       (literal("<") ~> rep1(ident) <~ literal(">")) ~ system ^^ {
-        case dims ~ sys => RawPLabel(name, tele, dims, sys)
-      } | success(RawOLabel(name, tele))
+        case dims ~ sys => RawPathLabel(name, tele, dims, sys)
+      } | success(RawOrdinaryLabel(name, tele))
     }
 
   // ---- Declaration resolution ----
@@ -820,15 +820,15 @@ private[cubical] class CubicalParser extends RegexParsers {
     val tele = flattenRawTele(rawTele)
     val loc = freshLoc()
 
-    val cs = rawLabels.collect { case RawOLabel(lbl, _) => (lbl, SymKind.Constructor: SymKind) }
-    val pcs = rawLabels.collect { case RawPLabel(lbl, _, _, _) => (lbl, SymKind.PConstructor: SymKind) }
+    val cs = rawLabels.collect { case RawOrdinaryLabel(lbl, _) => (lbl, SymKind.Constructor: SymKind) }
+    val pcs = rawLabels.collect { case RawPathLabel(lbl, _, _, _) => (lbl, SymKind.PConstructor: SymKind) }
     val sumCtor = if (!useHSum && pcs.isEmpty) Term.Sum.apply else Term.HSum.apply
 
     val rawLabelsResolved = rawLabels.map {
-      case RawOLabel(lbl, rawLabelTele) =>
-        Label.OLabel(lbl, flattenRawTele(rawLabelTele))
-      case RawPLabel(lbl, rawLabelTele, dims, sys) =>
-        Label.PLabel(lbl, flattenRawTele(rawLabelTele), dims.map(Name.apply), sys)
+      case RawOrdinaryLabel(lbl, rawLabelTele) =>
+        Label.OrdinaryLabel(lbl, flattenRawTele(rawLabelTele))
+      case RawPathLabel(lbl, rawLabelTele, dims, sys) =>
+        Label.PathLabel(lbl, flattenRawTele(rawLabelTele), dims.map(Name.apply), sys)
     }
 
     for {
@@ -868,13 +868,13 @@ private[cubical] class CubicalParser extends RegexParsers {
     case RawDeclDef(name, _, _, _)     => List((name, SymKind.Variable))
     case RawDeclData(name, _, labels)  =>
       (name, SymKind.Variable: SymKind) :: labels.map {
-        case RawOLabel(lbl, _)       => (lbl, SymKind.Constructor: SymKind)
-        case RawPLabel(lbl, _, _, _) => (lbl, SymKind.PConstructor: SymKind)
+        case RawOrdinaryLabel(lbl, _)       => (lbl, SymKind.Constructor: SymKind)
+        case RawPathLabel(lbl, _, _, _) => (lbl, SymKind.PConstructor: SymKind)
       }
     case RawDeclHData(name, _, labels) =>
       (name, SymKind.Variable: SymKind) :: labels.map {
-        case RawOLabel(lbl, _)       => (lbl, SymKind.Constructor: SymKind)
-        case RawPLabel(lbl, _, _, _) => (lbl, SymKind.PConstructor: SymKind)
+        case RawOrdinaryLabel(lbl, _)       => (lbl, SymKind.Constructor: SymKind)
+        case RawPathLabel(lbl, _, _, _) => (lbl, SymKind.PConstructor: SymKind)
       }
     case RawDeclSplit(name, _, _, _)   => List((name, SymKind.Variable))
     case RawDeclUndef(name, _, _)      => List((name, SymKind.Variable))
@@ -895,12 +895,12 @@ private[cubical] class CubicalParser extends RegexParsers {
     case RawDeclData(name, rawTele, rawLabels) =>
       val tele = flattenRawTele(rawTele)
       val loc = freshLoc()
-      val cs = rawLabels.collect { case RawOLabel(lbl, _) => (lbl, SymKind.Constructor: SymKind) }
-      val pcs = rawLabels.collect { case RawPLabel(lbl, _, _, _) => (lbl, SymKind.PConstructor: SymKind) }
+      val cs = rawLabels.collect { case RawOrdinaryLabel(lbl, _) => (lbl, SymKind.Constructor: SymKind) }
+      val pcs = rawLabels.collect { case RawPathLabel(lbl, _, _, _) => (lbl, SymKind.PConstructor: SymKind) }
       val sumCtor = if (pcs.isEmpty) Term.Sum.apply else Term.HSum.apply
       val rawLabelsResolved = rawLabels.map {
-        case RawOLabel(lbl, rawLabelTele) => Label.OLabel(lbl, flattenRawTele(rawLabelTele))
-        case RawPLabel(lbl, rawLabelTele, dims, sys) => Label.PLabel(lbl, flattenRawTele(rawLabelTele), dims.map(Name.apply), sys)
+        case RawOrdinaryLabel(lbl, rawLabelTele) => Label.OrdinaryLabel(lbl, flattenRawTele(rawLabelTele))
+        case RawPathLabel(lbl, rawLabelTele, dims, sys) => Label.PathLabel(lbl, flattenRawTele(rawLabelTele), dims.map(Name.apply), sys)
       }
       for {
         rType <- resolveBindsPi(tele, Term.U)
@@ -912,11 +912,11 @@ private[cubical] class CubicalParser extends RegexParsers {
     case RawDeclHData(name, rawTele, rawLabels) =>
       val tele = flattenRawTele(rawTele)
       val loc = freshLoc()
-      val cs = rawLabels.collect { case RawOLabel(lbl, _) => (lbl, SymKind.Constructor: SymKind) }
-      val pcs = rawLabels.collect { case RawPLabel(lbl, _, _, _) => (lbl, SymKind.PConstructor: SymKind) }
+      val cs = rawLabels.collect { case RawOrdinaryLabel(lbl, _) => (lbl, SymKind.Constructor: SymKind) }
+      val pcs = rawLabels.collect { case RawPathLabel(lbl, _, _, _) => (lbl, SymKind.PConstructor: SymKind) }
       val rawLabelsResolved = rawLabels.map {
-        case RawOLabel(lbl, rawLabelTele) => Label.OLabel(lbl, flattenRawTele(rawLabelTele))
-        case RawPLabel(lbl, rawLabelTele, dims, sys) => Label.PLabel(lbl, flattenRawTele(rawLabelTele), dims.map(Name.apply), sys)
+        case RawOrdinaryLabel(lbl, rawLabelTele) => Label.OrdinaryLabel(lbl, flattenRawTele(rawLabelTele))
+        case RawPathLabel(lbl, rawLabelTele, dims, sys) => Label.PathLabel(lbl, flattenRawTele(rawLabelTele), dims.map(Name.apply), sys)
       }
       for {
         rType <- resolveBindsPi(tele, Term.U)
@@ -1143,11 +1143,11 @@ private[cubical] class CubicalParser extends RegexParsers {
     }
 
   private def resolveBranch(b: Branch): Either[String, Branch] = b match {
-    case Branch.OBranch(ctor, vars, body) =>
-      withResolverScope(_.insertVars(vars))(resolveTerm(body)).map(rb => Branch.OBranch(ctor, vars, rb))
-    case Branch.PBranch(ctor, vars, dims, body) =>
+    case Branch.OrdinaryBranch(ctor, vars, body) =>
+      withResolverScope(_.insertVars(vars))(resolveTerm(body)).map(rb => Branch.OrdinaryBranch(ctor, vars, rb))
+    case Branch.PathBranch(ctor, vars, dims, body) =>
       withResolverScope(_.insertNames(dims.map(_.value)).insertVars(vars))(resolveTerm(body))
-        .map(rb => Branch.PBranch(ctor, vars, dims, rb))
+        .map(rb => Branch.PathBranch(ctor, vars, dims, rb))
   }
 
   private def resolveLabels(labels: List[Label]): Either[String, List[Label]] =
@@ -1156,9 +1156,9 @@ private[cubical] class CubicalParser extends RegexParsers {
     }
 
   private def resolveLabel(l: Label): Either[String, Label] = l match {
-    case Label.OLabel(name, tele) =>
-      resolveTelescope(tele).map(rt => Label.OLabel(name, rt))
-    case Label.PLabel(name, tele, dims, sys) =>
+    case Label.OrdinaryLabel(name, tele) =>
+      resolveTelescope(tele).map(rt => Label.OrdinaryLabel(name, rt))
+    case Label.PathLabel(name, tele, dims, sys) =>
       for {
         rt <- resolveTelescope(tele)
         rSys <- withResolverScope(env => {
@@ -1166,7 +1166,7 @@ private[cubical] class CubicalParser extends RegexParsers {
           val withVars = withNames.insertVars(tele.map(_._1))
           withVars
         })(resolveSystemTerm(sys))
-      } yield Label.PLabel(name, rt, dims, rSys)
+      } yield Label.PathLabel(name, rt, dims, rSys)
   }
 
   private def resolveTelescope(tele: Telescope): Either[String, Telescope] =
@@ -1260,8 +1260,8 @@ private[cubical] class CubicalParser extends RegexParsers {
       val tele = flattenRawTele(rawTele)
       val loc = freshLoc()
       val labels = rawLabels.map {
-        case RawOLabel(lbl, rawLabelTele) => Label.OLabel(lbl, flattenRawTele(rawLabelTele))
-        case RawPLabel(lbl, rawLabelTele, dims, sys) => Label.PLabel(lbl, flattenRawTele(rawLabelTele), dims.map(Name.apply), sys)
+        case RawOrdinaryLabel(lbl, rawLabelTele) => Label.OrdinaryLabel(lbl, flattenRawTele(rawLabelTele))
+        case RawPathLabel(lbl, rawLabelTele, dims, sys) => Label.PathLabel(lbl, flattenRawTele(rawLabelTele), dims.map(Name.apply), sys)
       }
       val rType = buildBindsPi(tele, Term.U)
       val rBody = buildLams(tele, Term.Sum(loc, name, labels))
@@ -1271,8 +1271,8 @@ private[cubical] class CubicalParser extends RegexParsers {
       val tele = flattenRawTele(rawTele)
       val loc = freshLoc()
       val labels = rawLabels.map {
-        case RawOLabel(lbl, rawLabelTele) => Label.OLabel(lbl, flattenRawTele(rawLabelTele))
-        case RawPLabel(lbl, rawLabelTele, dims, sys) => Label.PLabel(lbl, flattenRawTele(rawLabelTele), dims.map(Name.apply), sys)
+        case RawOrdinaryLabel(lbl, rawLabelTele) => Label.OrdinaryLabel(lbl, flattenRawTele(rawLabelTele))
+        case RawPathLabel(lbl, rawLabelTele, dims, sys) => Label.PathLabel(lbl, flattenRawTele(rawLabelTele), dims.map(Name.apply), sys)
       }
       val rType = buildBindsPi(tele, Term.U)
       val rBody = buildLams(tele, Term.HSum(loc, name, labels))
