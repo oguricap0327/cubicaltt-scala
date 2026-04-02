@@ -19,5 +19,9 @@ lazy val root = project
     ),
 
     // Main entry point
-    Compile / mainClass := Some("cubical.Main")
+    Compile / mainClass := Some("cubical.Main"),
+
+    // Exclude slow tests by default; run with:
+    //  sbt 'set Test / testOptions := Seq()' "testOnly * -- -n Slow"
+    Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", "Slow")
   )

@@ -60,12 +60,25 @@ object Main {
     names: List[(Ident, SymKind)]
   )
 
+  private def resolveImport(name: String, localDir: File, searchDirs: List[File]): File = {
+    val localFile = new File(localDir, s"$name.ctt")
+    if (localFile.exists()) localFile else {
+      searchDirs
+        .map(dir => new File(dir, s"$name.ctt"))
+        .find(_.exists())
+        .getOrElse(throw new RuntimeException(
+          s"Cannot find import $name (searched ${(localDir +: searchDirs).mkString(", ")})"
+        ))
+    }
+  }
+
   def imports(
     verbose: Boolean,
     notOk: Set[String],
     loaded: Set[String],
     modules: List[LoadedModule],
-    filePath: String
+    filePath: String,
+    searchDirs: List[File] = Nil
   ): (Set[String], Set[String], List[LoadedModule]) = {
     if (notOk.contains(filePath)) {
       throw new RuntimeException(s"Looping imports in $filePath")
@@ -79,7 +92,7 @@ object Main {
       throw new RuntimeException(s"$filePath does not exist")
     }
 
-    val prefix = Option(file.getParent).map(_ + File.separator).getOrElse("")
+    val localDir = Option(file.getParentFile).getOrElse(new File("."))
     val source = Source.fromFile(file).mkString
     val expectedName = file.getName.stripSuffix(".ctt")
 
@@ -87,21 +100,18 @@ object Main {
       case Left(err) =>
         throw new RuntimeException(s"Parse failed in $filePath\n$err")
       case Right(pi) =>
-        if (pi.name != expectedName) {
-          throw new RuntimeException(
-            s"Module name mismatch in $filePath: expected $expectedName, got ${pi.name}"
-          )
-        }
-        pi
+        if pi.name != expectedName then throw new RuntimeException(
+          s"Module name mismatch in $filePath: expected $expectedName, got ${pi.name}"
+        ) else pi
     }
 
-    val importPaths = parsedImports.imports.map(imp => prefix + imp + ".ctt")
+    val importFiles = parsedImports.imports.map(imp => resolveImport(imp, localDir, searchDirs))
     var currentNotOk = notOk + filePath
     var currentLoaded = loaded
     var currentModules = modules
 
-    for (imp <- importPaths) {
-      val (no, lo, mo) = imports(verbose, currentNotOk, currentLoaded, currentModules, imp)
+    for (imp <- importFiles) {
+      val (no, lo, mo) = imports(verbose, currentNotOk, currentLoaded, currentModules, imp.getPath, searchDirs)
       currentNotOk = no
       currentLoaded = lo
       currentModules = mo
@@ -124,12 +134,18 @@ object Main {
 
   private def initLoop(options: Options, filePath: String): Unit = {
     try {
+      val file = new File(filePath)
+      val localDir = Option(file.getParentFile).getOrElse(new File("."))
+      val parentOfLocal = Option(localDir.getParentFile).filter(_.isDirectory)
+      val searchDirs = parentOfLocal.toList.filterNot(_ == localDir)
+
       val (_, _, modules) = imports(
         options.verbose,
         Set.empty,
         Set.empty,
         Nil,
-        filePath
+        filePath,
+        searchDirs
       )
 
       val allDecls = modules.flatMap(_.declarations)

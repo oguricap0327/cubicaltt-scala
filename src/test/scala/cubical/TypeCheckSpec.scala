@@ -1,30 +1,37 @@
 package cubical
 
 import org.scalatest.ParallelTestExecution
+import org.scalatest.Tag
 import org.scalatest.flatspec.AnyFlatSpec
 
 import java.io.File
 import scala.io.Source
 import scala.util.Using
 
+object Slow extends Tag("Slow")
+
 class TypeCheckSpec extends AnyFlatSpec with ParallelTestExecution {
 
-  val exampleFiles: Array[File] = Option(new File("examples").listFiles())
-    .getOrElse(Array.empty[File])
-    .filter(f => f.isFile && f.getName.endsWith(".ctt"))
-    .sortBy(_.getName)
+  private val examplesDir = new File("examples")
+  private val slowDir = new File("examples/slow")
 
-  exampleFiles.foreach { file =>
+  private def cttFiles(dir: File): Array[File] =
+    Option(dir.listFiles())
+      .getOrElse(Array.empty[File])
+      .filter(f => f.isFile && f.getName.endsWith(".ctt"))
+      .sortBy(_.getName)
+
+  private val searchDirs: List[File] = List(examplesDir, slowDir).filter(_.isDirectory)
+
+  cttFiles(examplesDir).foreach { file =>
     "Type checker" should s"successfully check ${file.getName}" in {
-      println(s"Testing ${file.getName}...")
-      val (_, _, modules) = TypeCheckSpec.loadModules(file.getPath)
-      val allDecls = modules.flatMap(_.declarations)
-      val (maybeErr, _) = TypeChecker.runDeclss(TEnv.silentEnv, allDecls)
+      TypeCheckSpec.checkFile(file, searchDirs)
+    }
+  }
 
-      maybeErr match {
-        case Some(err) => fail(s"Type check error: $err")
-        case None => succeed
-      }
+  cttFiles(slowDir).foreach { file =>
+    "Type checker" should s"successfully check slow/${file.getName}" taggedAs Slow in {
+      TypeCheckSpec.checkFile(file, searchDirs)
     }
   }
 }
@@ -39,11 +46,32 @@ object TypeCheckSpec {
   def readFile(file: File): String =
     Using.resource(Source.fromFile(file))(_.mkString)
 
+  def checkFile(file: File, searchDirs: List[File]): Unit = {
+    val (_, _, modules) = loadModules(file.getPath, searchDirs = searchDirs)
+    val allDecls = modules.flatMap(_.declarations)
+    val (maybeErr, _) = TypeChecker.runDeclss(TEnv.silentEnv, allDecls)
+    maybeErr.foreach { err =>
+      throw new AssertionError(s"Type check error: $err")
+    }
+  }
+
+  def resolveImport(name: String, localDir: File, searchDirs: List[File]): File = {
+    val localFile = new File(localDir, s"$name.ctt")
+    if (localFile.exists()) localFile
+    else {
+      searchDirs
+        .map(dir => new File(dir, s"$name.ctt"))
+        .find(_.exists())
+        .getOrElse(throw new RuntimeException(s"Cannot find import $name (searched ${localDir +: searchDirs})"))
+    }
+  }
+
   def loadModules(
     filePath: String,
     notOk: Set[String] = Set.empty,
     loaded: Set[String] = Set.empty,
-    modules: List[LoadedModule] = Nil
+    modules: List[LoadedModule] = Nil,
+    searchDirs: List[File] = Nil
   ): (Set[String], Set[String], List[LoadedModule]) = {
     if (notOk.contains(filePath)) {
       throw new RuntimeException(s"Looping imports in $filePath")
@@ -63,23 +91,20 @@ object TypeCheckSpec {
     val parsedImports = Parser.parseImports(source) match {
       case Left(err) => throw new RuntimeException(s"Parse failed in $filePath\n$err")
       case Right(pi) =>
-        if (pi.name != expectedName) {
-          throw new RuntimeException(
-            s"Module name mismatch in $filePath: expected $expectedName, got ${pi.name}"
-          )
-        }
-        pi
+        if (pi.name != expectedName) throw new RuntimeException(
+          s"Module name mismatch in $filePath: expected $expectedName, got ${pi.name}"
+        ) else pi
     }
 
     val parent = Option(file.getParentFile).getOrElse(new File("."))
-    val importPaths = parsedImports.imports.map(imp => new File(parent, s"$imp.ctt").getPath)
+    val importFiles = parsedImports.imports.map(imp => resolveImport(imp, parent, searchDirs))
 
     var currentNotOk = notOk + filePath
     var currentLoaded = loaded
     var currentModules = modules
 
-    for (imp <- importPaths) {
-      val (no, lo, mo) = loadModules(imp, currentNotOk, currentLoaded, currentModules)
+    for (imp <- importFiles) {
+      val (no, lo, mo) = loadModules(imp.getPath, currentNotOk, currentLoaded, currentModules, searchDirs)
       currentNotOk = no
       currentLoaded = lo
       currentModules = mo
